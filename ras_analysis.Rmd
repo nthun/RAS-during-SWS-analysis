@@ -111,26 +111,26 @@ plot_1 <- ggplot(diag_data) +
     aes(x = .fitted, y = .resid) +
     geom_point(alpha = .5, shape = ".") +
     geom_smooth() +
-    ggtitle("A: Predicted values versus the residuals")
+    ggtitle("A",subtitle = "Predicted values versus the residuals")
 
 plot_2 <- ggplot(diag_data) +
     aes(x = .fitted, y = sqrt(abs(.stdresid))) +
     geom_point(alpha = .5, shape = ".") +
     geom_smooth() +
-    ggtitle("B: Predicted values versus the standardised residuals")
+    ggtitle("B", subtitle = "Predicted values versus the standardised residuals")
     # labs(x = "\\sqrt{/residual/}", parse = TRUE)
 
 plot_3 <- ggplot(diag_data) +
     aes(sample = .stdresid) +
     geom_qq_line(color = "blue") +
     geom_qq() +
-    ggtitle("C: QQ plot of the residuals")
+    ggtitle("C", subtitle = "QQ plot of the residuals")
 
 plot_4 <- ggplot(diag_data) +
     aes(x = .stdresid) +
     geom_histogram(bins = 30) +
     geom_freqpoly(data = rnorm(nrow(diag_data), 0, 1) %>% data_frame(x = .), aes(x = x), color = "red", size = 1) +
-    ggtitle("D: Distribution of the residuals", subtitle = "The red line shows the normal distribution")
+    ggtitle("D",subtitle = "Distribution of the residuals\nThe red line shows the normal distribution")
 
 gridExtra::grid.arrange(plot_1, plot_2, plot_3, plot_4)
 ```
