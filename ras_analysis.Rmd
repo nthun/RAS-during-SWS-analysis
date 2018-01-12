@@ -1,0 +1,149 @@
+---
+title: "Hypothesis testing for the RAS in slow wave sleep"
+output: html_notebook
+---
+
+```{r load libraries, include=FALSE}
+library(tidyverse)
+library(modelr)
+library(ggfortify)
+library(broom)
+library(lme4)
+library(lmerTest)
+```
+
+
+## Aim of the notebook
+To build and test a statistical model that verifies (or refutes) hypotheses about RAS in SWS.
+
+**Hypothesis 1:** RAS will selectively increase Delta power in SWS (cond X band interaction)  
+**Hypothesis 2:** RAS will selectively increase Delta power in the targeted hemisphere (cond X band X side interaction)  
+**Expected findings:** In SWS, EEG power bands should have a maked difference: Delta and Theta should be increased, while Beta, Alpha and Sigma should be decreased  
+
+We first read and modify the data for ease of use, and to extract further data. We make a new variable from the id that shows if the origin of the recording, based on naming differences. We also make a sex variable, however the last 9 id-s do not contain data about participant sex (they are labelled as females, because there is no apparent sex difference, so I did't bother to further investigate this). 
+We used a logarithmic transformation on the power spectrum data.
+<!-- The data is also standardized for all participants separately. -->
+
+
+```{r read data}
+ras <- read_csv("ras_data.csv") %>% 
+    set_names(names(.) %>% str_to_lower()) %>% 
+    mutate(cond = fct_relevel(cond, c("SILENT","RAS")),
+           side = fct_relevel(side, c("Untargeted","Targeted")),
+           origin = if_else(str_detect(id, "^\\d{2}-.*"), "old", "new"),
+           sex = if_else(str_detect(id, "^.*-.*-M.*"), "male", "female"), # Last 7 is not correct!
+           value_log = log(value +1)
+           ) %>% 
+    group_by(id) %>%
+    mutate(value_std = scale(value_log) %>% as.numeric()) %>%
+    ungroup()
+
+```
+
+# Model building
+First, we compare a model that does not account for individual variability.
+
+```{r}
+# Create a model that ignores the dependence in data, and use all possible variable combinations
+ras_lm <- lm(value ~ cond*band*side, data = ras)
+```
+
+
+## Before we continue, we should investigate the effect of the trials.  
+
+The histograms show that most of the participants have about 20 trials. Only a few participants have more then 60 trials. This is not a problem if the trials exert the same effect on the EEG spectra. 
+However, it seems like the trials do have an effect on the EEG, so we will need to include this in the model.  
+```{r}
+ggplot(ras) +
+    aes(x = trial) +
+    geom_histogram() +
+    ggtitle("Distribution of the number of trials")
+
+ras %>% 
+    ggplot() +
+    aes(x = trial, y = value) +
+    geom_smooth() +
+    facet_wrap(~band, scales = "free") +
+    ggtitle("The effect of trial on brand frequency power")
+```
+
+
+# Finding the random structure
+Based on the model comparisons, it seems like the random intercept model has an adventage over the linear regression without random terms. However, the random slope model does not seem to increase the model fit.
+
+```{r}
+# Model with random intercept
+ras_lmer_i <- lmer(value_log ~ cond*band*side + (1|id) + (1|trial), data = ras)
+# Model with random intercept and slope
+ras_lmer_is <- lmer(value_log ~ cond*band*side + (cond|id) + (cond|trial), data = ras)
+
+anova(ras_lmer_i, ras_lm)
+anova(ras_lmer_i, ras_lmer_is)
+
+```
+
+# Evaluate the model
+It seems like the RAS indeed selectively increased the Delta activity during sleep. 
+Moreover, there was a significant effect of targeting on the delta power, whereas the targeted hemisphere showed a lower delta power. This finding supports hypothesis 1.
+
+However, there we fonund no significant 3-way interactions, i.e. there is no evidence of a selective change in bandpower during the RAS in the targeted hemisphere. Therefore hypothesis 2 could not be verified.
+
+Also, as expected, the band main effects were significant during sleep: delta and theta power was higher, while beta and sigma power was lower (compared to alpha activity that was used as baseline). 
+
+```{r fig.height=9, fig.width=8}
+
+# Retrain the model with standardised coefficients
+summary(ras_lmer_i)
+GGally::ggcoef(ras_lmer_i)
+```
+
+
+# Investigate the residuals
+
+The residual plots indicate that the residuals are not exactly normally distributed. However, the distribution of residuals is symmetrical, and unimodal. Data is not normal because the distribution seems to have a higher kurtosis, compared to normal distribution. In my opinion, this difference does not seem to be problematic.
+
+```{r fig.width=9}
+diag_data <- 
+    augment(ras_lmer_i, ras) %>% 
+    mutate(.stdresid = scale(.resid) %>% as.numeric())
+
+plot_1 <- ggplot(diag_data) +
+    aes(x = .fitted, y = .resid) +
+    geom_point(alpha = .5, shape = ".") +
+    geom_smooth() +
+    ggtitle("A: Predicted values versus the residuals")
+
+plot_2 <- ggplot(diag_data) +
+    aes(x = .fitted, y = sqrt(abs(.stdresid))) +
+    geom_point(alpha = .5, shape = ".") +
+    geom_smooth() +
+    ggtitle("B: Predicted values versus the standardised residuals")
+    # labs(x = "\\sqrt{/residual/}", parse = TRUE)
+
+plot_3 <- ggplot(diag_data) +
+    aes(sample = .stdresid) +
+    geom_qq_line(color = "blue") +
+    geom_qq() +
+    ggtitle("C: QQ plot of the residuals")
+
+plot_4 <- ggplot(diag_data) +
+    aes(x = .stdresid) +
+    geom_histogram(bins = 30) +
+    geom_freqpoly(data = rnorm(nrow(diag_data), 0, 1) %>% data_frame(x = .), aes(x = x), color = "red", size = 1) +
+    ggtitle("D: Distribution of the residuals", subtitle = "The red line shows the normal distribution")
+
+gridExtra::grid.arrange(plot_1, plot_2, plot_3, plot_4)
+```
+
+
+# Explained variance
+We can calculate the R squared for the fixed effects only (marginal R2), and adding the random terms (conditional R2). It seems like that the model explain a large portion of the variance, however it is sure that the biggest portion is explained by the band main effect. 
+
+```{r}
+MuMIn::r.squaredGLMM(ras_lmer_i)
+```
+
+# Conclusion
+The verification of hypothesis 1 supports the idea that 4 Hz RAS can selectively increase delta bandpower in slow-wave sleep. On the other hand, we could not support hypothesis 2 which asserted that it is possible to selectively increase Delta power in the targeted hemisphere. 
+
+
